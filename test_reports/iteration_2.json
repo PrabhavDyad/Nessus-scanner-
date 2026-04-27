@@ -1,0 +1,36 @@
+{
+  "summary": "Iteration 2: Validated NSE whitelist enforcement + vuln preset + PDF export on NetScan. Updated existing pytest file to expect 7 scan types (including 'vuln') and added 9 new tests covering NSE whitelist (block/allow/--script= form/--script-args/-iL), vuln preset creation, and PDF export (success + 404). Ran full suite: 20/21 passed. One failure is a timing flake (vuln NSE scan didn't complete within 180s due to parallel test load); increased timeout to 300s for future runs. All functional assertions on vuln preset (flags, label) pass. Frontend verified end-to-end on mobile viewport: 7 scan cards rendered incl. scan-type-vuln, tapping vuln selects it, custom card exposes custom-flags-input + whitelist helper text, quick scan on 127.0.0.1 navigates to detail, status reaches COMPLETED, export-pdf-btn and delete-scan-btn both appear in header, tapping export opens PDF in a new tab.",
+  "backend_issues": {
+    "critical": [],
+    "minor": [
+      {"endpoint": "POST /api/scans vuln preset", "issue": "NSE vuln scan on 127.0.0.1 sometimes takes >180s in this container (one run took 94s standalone, 180s+ under parallel test load). Functionality is fine; test deadline bumped to 300s."}
+    ]
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [],
+    "react_native_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_netscan_api.py",
+    "/app/test_reports/pytest/pytest_results.xml"
+  ],
+  "action_items": [
+    "Optional: consider reducing vuln preset NSE set or --top-ports to speed up scans in CI (currently --script vuln,vulners,http-title --top-ports 200)."
+  ],
+  "critical_code_review_comments": [
+    "server.py is ~628 lines and starting to mix concerns (models, parsing, heuristics, PDF rendering, routes). Split render_scan_pdf and analyze_findings into their own modules before it grows past 700 lines.",
+    "render_scan_pdf imports reportlab inside the function (good for cold start) but does so every request; move imports to module top once >0 requests in practice is expected.",
+    "Whitelist is hardcoded constant; consider making it configurable via env for future flexibility."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_netscan_api.py"
+  ],
+  "success_rate": {"backend": "95% (20/21)", "frontend": "100%"},
+  "seed_data_creation": "None (tests create and clean up their own scans).",
+  "retest_needed": false,
+  "should_main_agent_self_test": true,
+  "context_for_next_testing_agent": "Backend pytest file covers all current features. NSE whitelist enforcement and --script= form both validated. PDF export returns %PDF-1.x with Content-Disposition netscan-<target>-<id8>.pdf. Frontend uses testIDs: hero-box, target-input, scan-type-{key} (7 keys), custom-flags-input, start-scan-btn, scan-status, export-pdf-btn, delete-scan-btn. For web PDF export the frontend uses window.open so Playwright should use context.expect_page to catch the popup; do NOT wait_for_load_state('domcontentloaded') on the PDF tab — binary responses don't fire it.",
+  "rca_of_issue": "Single test failure test_vuln_scan_eventually_completes was a timeout (180s) flake — vuln NSE scan ran concurrently with other tests and exceeded deadline. Not a functional bug; creation + flags + label all validated. Deadline extended to 300s in the file."
+}

@@ -29,6 +29,7 @@ const SCAN_TYPE_DESCRIPTIONS: Record<string, string> = {
   service: "Service & version detection (-sV)",
   os: "OS fingerprinting (-O)",
   intense: "Aggressive scan (-A)",
+  vuln: "NSE vulnerability scripts (vuln, vulners)",
   custom: "Use your own nmap flags",
 };
 
@@ -184,7 +185,8 @@ export default function ScanScreen() {
               style={[styles.input, { fontFamily: FONTS.mono }]}
             />
             <Text style={styles.helperText}>
-              Shell metacharacters are blocked. Don&apos;t use ; &amp; | $ etc.
+              Shell metacharacters blocked. NSE scripts must be in whitelist
+              (vuln, vulners, safe, default, discovery, banner, http-*, ssl-*, etc.)
             </Text>
           </>
         )}

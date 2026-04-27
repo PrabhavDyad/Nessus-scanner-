@@ -7,6 +7,8 @@ import {
   ActivityIndicator,
   TouchableOpacity,
   Alert,
+  Linking,
+  Platform,
 } from "react-native";
 import { useLocalSearchParams, useRouter, Stack } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
@@ -126,6 +128,23 @@ export default function ScanDetail() {
     ]);
   };
 
+  const onExportPdf = async () => {
+    if (!scan) return;
+    const url = `${API_URL}/api/scans/${scan.id}/pdf`;
+    try {
+      if (Platform.OS === "web") {
+        // Trigger browser download
+        if (typeof window !== "undefined") {
+          window.open(url, "_blank");
+        }
+      } else {
+        await Linking.openURL(url);
+      }
+    } catch (e: any) {
+      Alert.alert("Export failed", e?.message || "Could not open PDF");
+    }
+  };
+
   if (loading || !scan) {
     return (
       <View style={[styles.container, styles.centered]}>
@@ -145,9 +164,24 @@ export default function ScanDetail() {
         options={{
           title: "// SCAN",
           headerRight: () => (
-            <TouchableOpacity onPress={onDelete} testID="delete-scan-btn" style={{ paddingHorizontal: 12 }}>
-              <Ionicons name="trash-outline" size={20} color={COLORS.severity.critical} />
-            </TouchableOpacity>
+            <View style={{ flexDirection: "row", alignItems: "center" }}>
+              {scan.status === "completed" && (
+                <TouchableOpacity
+                  onPress={onExportPdf}
+                  testID="export-pdf-btn"
+                  style={{ paddingHorizontal: 10 }}
+                >
+                  <Ionicons name="download-outline" size={20} color={COLORS.primary} />
+                </TouchableOpacity>
+              )}
+              <TouchableOpacity
+                onPress={onDelete}
+                testID="delete-scan-btn"
+                style={{ paddingHorizontal: 10 }}
+              >
+                <Ionicons name="trash-outline" size={20} color={COLORS.severity.critical} />
+              </TouchableOpacity>
+            </View>
           ),
         }}
       />

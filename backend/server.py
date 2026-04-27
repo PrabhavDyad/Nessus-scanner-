@@ -1,7 +1,9 @@
 from fastapi import FastAPI, APIRouter, HTTPException
+from fastapi.responses import Response
 from dotenv import load_dotenv
 from starlette.middleware.cors import CORSMiddleware
 from motor.motor_asyncio import AsyncIOMotorClient
+import io
 import os
 import re
 import asyncio
@@ -42,6 +44,7 @@ SCAN_PRESETS: Dict[str, List[str]] = {
     "service": ["-sT", "-T4", "-sV", "--top-ports", "200"], # Service/version detection
     "os": ["-sT", "-T4", "-O", "--top-ports", "100"],       # OS detection (best-effort)
     "intense": ["-sT", "-T4", "-A", "-v", "--top-ports", "200"],  # Aggressive
+    "vuln": ["-sT", "-T4", "-sV", "--script", "vuln,vulners,http-title", "--top-ports", "200"],  # NSE vuln scripts
 }
 
 SCAN_LABELS = {
@@ -50,7 +53,18 @@ SCAN_LABELS = {
     "service": "Service Detection",
     "os": "OS Detection",
     "intense": "Intense Scan",
+    "vuln": "Vulnerability Scan (NSE)",
     "custom": "Custom Flags",
+}
+
+# Whitelist of safe-ish NSE scripts that may appear in custom flags
+NSE_SCRIPT_WHITELIST = {
+    "default", "safe", "discovery", "version", "vuln", "vulners",
+    "banner", "http-title", "http-headers", "http-methods",
+    "http-server-header", "http-robots.txt", "http-enum",
+    "ssl-cert", "ssl-enum-ciphers", "smb-os-discovery",
+    "ssh2-enum-algos", "ssh-hostkey", "dns-recursion",
+    "ftp-anon", "ftp-bounce", "smtp-commands",
 }
 
 
@@ -120,21 +134,60 @@ def validate_target(target: str) -> bool:
 def build_flags(scan_type: str, custom_flags: Optional[str]) -> List[str]:
     if scan_type == "custom":
         if not custom_flags:
-            return ["-T4", "-F"]
+            return ["-sT", "-T4", "-F"]
         if DANGEROUS_FLAGS_RE.search(custom_flags):
             raise ValueError("Custom flags contain forbidden characters")
-        # Split on whitespace; each token must start with - or be a number/port spec
         tokens = custom_flags.split()
         safe: List[str] = []
-        for t in tokens:
+        i = 0
+        while i < len(tokens):
+            t = tokens[i]
             if len(t) > 100:
                 raise ValueError("Flag token too long")
+            # NSE script whitelist enforcement
+            if t == "--script" and i + 1 < len(tokens):
+                _validate_nse_scripts(tokens[i + 1])
+                safe.append(t)
+                safe.append(tokens[i + 1])
+                i += 2
+                continue
+            if t.startswith("--script="):
+                _validate_nse_scripts(t.split("=", 1)[1])
+                safe.append(t)
+                i += 1
+                continue
+            # Block --script-args entirely (can read files, etc.)
+            if t.startswith("--script-args"):
+                raise ValueError("--script-args is not allowed")
+            # Block target file include
+            if t in ("-iL", "-iR") or t.startswith("-iL=") or t.startswith("-iR="):
+                raise ValueError(f"Flag {t} is not allowed")
             safe.append(t)
+            i += 1
+        # Always force unprivileged scan
+        if not any(x in ("-sT", "-sn", "-sP") for x in safe):
+            safe.insert(0, "-sT")
         return safe
     flags = SCAN_PRESETS.get(scan_type)
     if not flags:
         raise ValueError(f"Unknown scan type: {scan_type}")
     return list(flags)
+
+
+def _validate_nse_scripts(spec: str) -> None:
+    # spec like "vuln,vulners,http-title" or a single script name
+    for name in spec.split(","):
+        clean = name.strip().lower()
+        if not clean:
+            continue
+        # Block path-like or wildcard patterns
+        if "/" in clean or "*" in clean or ".." in clean:
+            raise ValueError(f"NSE script '{name}' is not allowed")
+        if clean not in NSE_SCRIPT_WHITELIST:
+            raise ValueError(
+                f"NSE script '{name}' is not in the whitelist. "
+                f"Allowed: {', '.join(sorted(NSE_SCRIPT_WHITELIST))}"
+            )
 
 
 def parse_nmap_xml(xml_text: str) -> tuple[List[HostResult], Dict[str, Any]]:
@@ -395,6 +448,167 @@ async def delete_scan(scan_id: str):
     if res.deleted_count == 0:
         raise HTTPException(status_code=404, detail="Scan not found")
     return {"deleted": True, "id": scan_id}
+
+
+@api_router.get("/scans/{scan_id}/pdf")
+async def export_scan_pdf(scan_id: str):
+    doc = await db.scans.find_one({"id": scan_id}, {"_id": 0})
+    if not doc:
+        raise HTTPException(status_code=404, detail="Scan not found")
+    scan = Scan(**doc)
+    pdf_bytes = render_scan_pdf(scan)
+    filename = f"netscan-{scan.target.replace('/', '_')}-{scan.id[:8]}.pdf"
+    return Response(
+        content=pdf_bytes,
+        media_type="application/pdf",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
+
+
+def render_scan_pdf(scan: Scan) -> bytes:
+    from reportlab.lib import colors
+    from reportlab.lib.pagesizes import A4
+    from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+    from reportlab.lib.units import mm
+    from reportlab.platypus import (
+        SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle, PageBreak,
+    )
+
+    SEV_COLORS = {
+        "critical": colors.HexColor("#EF4444"),
+        "high": colors.HexColor("#F97316"),
+        "medium": colors.HexColor("#EAB308"),
+        "low": colors.HexColor("#3B82F6"),
+        "info": colors.HexColor("#6366F1"),
+    }
+    PRIMARY = colors.HexColor("#10B981")
+    DARK = colors.HexColor("#0F172A")
+    GREY = colors.HexColor("#475569")
+
+    buf = io.BytesIO()
+    doc = SimpleDocTemplate(
+        buf, pagesize=A4,
+        leftMargin=18 * mm, rightMargin=18 * mm,
+        topMargin=18 * mm, bottomMargin=18 * mm,
+        title=f"NetScan Report - {scan.target}",
+    )
+    styles = getSampleStyleSheet()
+    h1 = ParagraphStyle("h1", parent=styles["Heading1"], textColor=DARK, fontName="Helvetica-Bold", fontSize=22, spaceAfter=4)
+    sub = ParagraphStyle("sub", parent=styles["Normal"], textColor=GREY, fontSize=10, spaceAfter=12)
+    h2 = ParagraphStyle("h2", parent=styles["Heading2"], textColor=PRIMARY, fontName="Helvetica-Bold", fontSize=13, spaceBefore=14, spaceAfter=6)
+    body = ParagraphStyle("body", parent=styles["Normal"], fontSize=10, leading=14)
+    mono = ParagraphStyle("mono", parent=styles["Code"], fontName="Courier", fontSize=9, leading=12, textColor=DARK)
+
+    story = []
+    story.append(Paragraph("NETSCAN — Mini Nessus Report", h1))
+    story.append(Paragraph(
+        f"Target: <b>{scan.target}</b> &nbsp;&nbsp; Type: {scan.scan_label} &nbsp;&nbsp; Status: {scan.status.upper()}",
+        sub,
+    ))
+
+    meta_rows = [
+        ["Scan ID", scan.id],
+        ["Created", scan.created_at.isoformat() if scan.created_at else "-"],
+        ["Finished", scan.finished_at.isoformat() if scan.finished_at else "-"],
+        ["Duration", f"{scan.duration_sec:.2f}s" if scan.duration_sec is not None else "-"],
+        ["Command", "nmap " + " ".join(scan.flags) + " " + scan.target],
+        ["Hosts up", str(scan.summary.get("hosts_up", 0))],
+        ["Open ports", str(scan.summary.get("open_ports", 0))],
+        ["Findings", str(len(scan.vuln_hints))],
+    ]
+    meta_table = Table(meta_rows, colWidths=[35 * mm, 130 * mm])
+    meta_table.setStyle(TableStyle([
+        ("BACKGROUND", (0, 0), (0, -1), colors.HexColor("#F1F5F9")),
+        ("FONT", (0, 0), (-1, -1), "Helvetica", 9),
+        ("FONT", (0, 0), (0, -1), "Helvetica-Bold", 9),
+        ("TEXTCOLOR", (0, 0), (-1, -1), DARK),
+        ("BOX", (0, 0), (-1, -1), 0.5, colors.HexColor("#CBD5E1")),
+        ("INNERGRID", (0, 0), (-1, -1), 0.25, colors.HexColor("#CBD5E1")),
+        ("VALIGN", (0, 0), (-1, -1), "TOP"),
+        ("LEFTPADDING", (0, 0), (-1, -1), 6),
+        ("RIGHTPADDING", (0, 0), (-1, -1), 6),
+        ("TOPPADDING", (0, 0), (-1, -1), 4),
+        ("BOTTOMPADDING", (0, 0), (-1, -1), 4),
+    ]))
+    story.append(meta_table)
+
+    if scan.error:
+        story.append(Paragraph("Error", h2))
+        story.append(Paragraph(scan.error.replace("<", "&lt;"), body))
+
+    story.append(Paragraph("Findings", h2))
+    if not scan.vuln_hints:
+        story.append(Paragraph("No findings recorded.", body))
+    else:
+        rows = [["Severity", "Title", "Description"]]
+        for v in scan.vuln_hints:
+            rows.append([v.severity.upper(), v.title, v.description])
+        f_table = Table(rows, colWidths=[22 * mm, 60 * mm, 83 * mm], repeatRows=1)
+        ts = [
+            ("BACKGROUND", (0, 0), (-1, 0), DARK),
+            ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
+            ("FONT", (0, 0), (-1, 0), "Helvetica-Bold", 9),
+            ("FONT", (0, 1), (-1, -1), "Helvetica", 8),
+            ("VALIGN", (0, 0), (-1, -1), "TOP"),
+            ("BOX", (0, 0), (-1, -1), 0.3, colors.HexColor("#CBD5E1")),
+            ("INNERGRID", (0, 0), (-1, -1), 0.25, colors.HexColor("#E2E8F0")),
+            ("LEFTPADDING", (0, 0), (-1, -1), 5),
+            ("RIGHTPADDING", (0, 0), (-1, -1), 5),
+            ("TOPPADDING", (0, 0), (-1, -1), 4),
+            ("BOTTOMPADDING", (0, 0), (-1, -1), 4),
+        ]
+        for i, v in enumerate(scan.vuln_hints, start=1):
+            sev_col = SEV_COLORS.get(v.severity, SEV_COLORS["info"])
+            ts.append(("TEXTCOLOR", (0, i), (0, i), sev_col))
+            ts.append(("FONT", (0, i), (0, i), "Helvetica-Bold", 8))
+        f_table.setStyle(TableStyle(ts))
+        story.append(f_table)
+
+    story.append(Paragraph("Hosts &amp; Ports", h2))
+    if not scan.hosts:
+        story.append(Paragraph("No hosts reported.", body))
+    for host in scan.hosts:
+        title = f"{host.address}"
+        if host.hostname:
+            title += f" ({host.hostname})"
+        title += f" — {host.state.upper()}"
+        if host.os_guess:
+            title += f" — OS: {host.os_guess}"
+        story.append(Paragraph(title, ParagraphStyle("hostHdr", parent=body, fontName="Helvetica-Bold", spaceBefore=8, spaceAfter=4)))
+        if not host.ports:
+            story.append(Paragraph("No ports.", body))
+            continue
+        prows = [["Port", "Proto", "State", "Service", "Product / Version"]]
+        for p in host.ports:
+            prows.append([
+                str(p.port), p.protocol, p.state,
+                p.service or "-",
+                " ".join(filter(None, [p.product, p.version, p.extrainfo])) or "-",
+            ])
+        ptable = Table(prows, colWidths=[18 * mm, 16 * mm, 18 * mm, 35 * mm, 78 * mm], repeatRows=1)
+        ptable.setStyle(TableStyle([
+            ("BACKGROUND", (0, 0), (-1, 0), DARK),
+            ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
+            ("FONT", (0, 0), (-1, 0), "Helvetica-Bold", 8),
+            ("FONT", (0, 1), (-1, -1), "Courier", 8),
+            ("VALIGN", (0, 0), (-1, -1), "TOP"),
+            ("BOX", (0, 0), (-1, -1), 0.3, colors.HexColor("#CBD5E1")),
+            ("INNERGRID", (0, 0), (-1, -1), 0.2, colors.HexColor("#E2E8F0")),
+            ("LEFTPADDING", (0, 0), (-1, -1), 4),
+            ("RIGHTPADDING", (0, 0), (-1, -1), 4),
+            ("TOPPADDING", (0, 0), (-1, -1), 3),
+            ("BOTTOMPADDING", (0, 0), (-1, -1), 3),
+        ]))
+        story.append(ptable)
+
+    story.append(Spacer(1, 12))
+    story.append(Paragraph(
+        "Generated by NetScan — Mini Nessus. Scan responsibly.",
+        ParagraphStyle("footer", parent=body, textColor=GREY, fontSize=8, alignment=1),
+    ))
+
+    doc.build(story)
+    return buf.getvalue()
 
 
 app.include_router(api_router)
