@@ -1,0 +1,90 @@
+{
+  "theme": "dark",
+  "archetype": "4 (Swiss Brutalist / Technical) + Retro-Futurism Surface",
+  "domain": "Cybersecurity / Mobile Network Scanner",
+  "colors": {
+    "background": "#09090B",
+    "surface": "#18181B",
+    "surface_glass": "rgba(24, 24, 27, 0.8)",
+    "primary": "#10B981",
+    "primary_hover": "#059669",
+    "text_primary": "#F4F4F5",
+    "text_secondary": "#A1A1AA",
+    "border": "#27272A",
+    "border_active": "rgba(16, 185, 129, 0.4)",
+    "severity": {
+      "critical": "#EF4444",
+      "high": "#F97316",
+      "medium": "#EAB308",
+      "low": "#3B82F6",
+      "info": "#6366F1"
+    }
+  },
+  "typography": {
+    "headings": {
+      "font_family": "JetBrains Mono, monospace",
+      "font_weight": "bold",
+      "tracking": "tracking-tight",
+      "sizes": {
+        "h1": "text-4xl sm:text-5xl",
+        "h2": "text-2xl sm:text-3xl",
+        "h3": "text-xl sm:text-2xl",
+        "h4": "text-lg sm:text-xl"
+      }
+    },
+    "body": {
+      "font_family": "IBM Plex Sans, sans-serif",
+      "sizes": {
+        "base": "text-sm sm:text-base",
+        "small": "text-xs sm:text-sm"
+      },
+      "line_height": "leading-relaxed"
+    },
+    "mono_terminal": {
+      "font_family": "JetBrains Mono, monospace",
+      "sizes": {
+        "base": "text-xs sm:text-sm"
+      }
+    }
+  },
+  "spacing_and_layout": {
+    "philosophy": "Mobile-first, compact but readable, dense lists. Control Room Grid style.",
+    "container_padding": "p-4 sm:p-6",
+    "gap": "gap-4 sm:gap-6",
+    "card_padding": "p-4 sm:p-5",
+    "border_radius": "rounded-none sm:rounded-sm"
+  },
+  "surface_strategies": {
+    "cards": "Flat background (surface), 1px subtle border, no shadow. Active/focus state gets a tinted neon border.",
+    "terminal_window": "Retro-Futurism: Deep black background, emerald text, monospace font, subtle 1px border. No border radius (sharp edges).",
+    "header": "Solid surface background with a sharp 1px bottom border."
+  },
+  "components": {
+    "navigation": "Bottom tab bar for mobile view (Scan, History, Settings) fixed at the bottom. Fixed header with app logo and active status.",
+    "buttons": "Square or very slightly rounded. Primary buttons have solid primary color, secondary buttons have border-only (outline).",
+    "inputs": "High contrast. Deep black background, glowing primary border on focus, large tappable area (min-h-[44px]) for mobile.",
+    "badges": "Solid background with 20% opacity of the severity color, 1px solid border of the severity color, and solid text color.",
+    "loader": "ASCII style progress (e.g., '[=====>   ]') or pulsing block. No standard circular spinners.",
+    "tables_lists": "Use dense lists/cards for mobile, rather than wide data tables. Stack host, port, state vertically if needed."
+  },
+  "animation": {
+    "interactions": "Fast, precise micro-interactions. Minimal easing.",
+    "hover_states": "Borders glow, text brightens.",
+    "transitions": "transition-all duration-150 ease-in-out"
+  },
+  "media": {
+    "hero_background": {
+      "url": "https://static.prod-images.emergentagent.com/jobs/a6cb82cb-0a6c-42e4-acbd-2e5a95ff4934/images/c9af29bd15bdd14321fc55053834115be1943a3875560a0e08b0b95da939a97a.png",
+      "description": "Dark, glowing neon scanlines abstract background, useful for empty state or header hero graphic. Use with an opacity overlay to keep text readable."
+    }
+  },
+  "instructions_to_main_agent": [
+    "Build the application as a mobile-first responsive web app, optimized for small screens with a bottom navigation bar layout.",
+    "Install and use JetBrains Mono and IBM Plex Sans from Google Fonts.",
+    "Use Phosphor Icons (or lucide-react) for crisp, technical icons.",
+    "Implement a 'Terminal Mode' box for the live Nmap output while scanning, with auto-scroll and JetBrains Mono.",
+    "Parse the results into structured cards with Nessus-style severity badges.",
+    "Ensure all interactive elements have a 'data-testid' attribute (e.g., 'data-testid=\"target-input\"').",
+    "Avoid raw HTML <select> or <input type='date'>; use Shadcn UI components and customize them with sharp edges and dark themes."
+  ]
+}
