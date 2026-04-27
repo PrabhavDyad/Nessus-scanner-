@@ -57,6 +57,10 @@ SCAN_LABELS = {
     "custom": "Custom Flags",
 }
 
+# Limit concurrent running scans to prevent resource abuse
+MAX_CONCURRENT_SCANS = 3
+_scan_semaphore = asyncio.Semaphore(MAX_CONCURRENT_SCANS)
+
 # Whitelist of safe-ish NSE scripts that may appear in custom flags
 NSE_SCRIPT_WHITELIST = {
     "default", "safe", "discovery", "version", "vuln", "vulners",
@@ -337,11 +341,12 @@ async def run_scan_task(scan_id: str, target: str, flags: List[str]):
         }})
         return
 
-    started = datetime.now(timezone.utc)
-    await db.scans.update_one({"id": scan_id}, {"$set": {
-        "status": "running",
-        "started_at": started,
-    }})
+    async with _scan_semaphore:
+        started = datetime.now(timezone.utc)
+        await db.scans.update_one({"id": scan_id}, {"$set": {
+            "status": "running",
+            "started_at": started,
+        }})
 
     cmd = ["nmap", *flags, "-oX", "-", target]
     logger.info(f"[scan {scan_id}] running: {' '.join(cmd)}")
