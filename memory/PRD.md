@@ -35,5 +35,21 @@ A mobile-first network scanner powered by **Nmap**, packaged as an Expo Router a
 - No external API keys required (no LLM / 3rd party integrations)
 - Mongo URL & DB name come from `backend/.env`
 
-## Legal
-The UI surfaces an in-app warning that scanning systems without authorisation may be illegal.
+## Security Hardening
+- Target regex validation (only `A-Za-z0-9._-:/,` allowed)
+- Custom-flag shell metachar blocklist (`; & | $ \` < > " '`)
+- NSE script whitelist (vuln, vulners, safe, default, banner, http-*, ssl-*, ssh-*, ftp-*, smb-os-discovery, etc.)
+- Blocks `--script-args`, `-iL`, `-iR` (file-read / mass-target risks)
+- Forces `-sT` (TCP connect) so the scanner runs without raw-socket privileges
+- Concurrent scan cap (`MAX_CONCURRENT_SCANS = 3`) via asyncio.Semaphore to prevent resource abuse
+- Hard 600s per-scan timeout; subprocess killed on overrun
+- In-app legal warning surfaced on scan screen and About tab
+
+## Deployment Readiness
+- Deployment health check: ✅ PASS (no blockers)
+- Required env vars present: `EXPO_TUNNEL_SUBDOMAIN`, `EXPO_PACKAGER_HOSTNAME`, `EXPO_PACKAGER_PROXY_URL`, `EXPO_PUBLIC_BACKEND_URL`, `MONGO_URL`, `DB_NAME`
+- ⚠️ **System dependency**: Production container must have `nmap` installed (`apt-get install -y nmap`). Backend gracefully reports `nmap_installed: false` and the UI shows "nmap NOT installed" if missing, so the app fails safe rather than crashing.
+
+## Testing
+- Backend pytest: 20/21 passing (1 long-running NSE test bumped to 300s timeout)
+- Playwright e2e: full scan→detail→history→PDF flow green
