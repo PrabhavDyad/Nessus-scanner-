@@ -9,14 +9,16 @@ A mobile-first network scanner powered by **Nmap**, packaged as an Expo Router a
 - **Storage**: MongoDB collection `scans` (UUIDs, no ObjectId leaks)
 
 ## Features
-- 6 scan modes: Quick (-F), Full (-p-), Service (-sV), OS (-O), Intense (-A), Custom (user flags)
+- 7 scan modes: Quick (-F), Full (-p-), Service (-sV), OS (-O), Intense (-A), **Vuln (NSE scripts)**, Custom (user flags)
 - All presets force TCP connect scan (`-sT`) since the container lacks raw-socket privileges
+- **NSE script whitelist** for custom flags (vuln, vulners, safe, default, discovery, banner, http-*, ssl-*, smb-os-discovery, ssh-*, ftp-*, smtp-commands, dns-recursion). Blocks `--script-args`, `-iL`, `-iR`, and any non-whitelisted script
 - Real-time status polling with terminal-style ASCII progress
 - Parsed host/port table (port, state, service, product, version)
 - Nessus-style vulnerability hints with Critical / High / Medium / Low / Info severity
 - Heuristic findings for telnet, ftp, rdp, redis, mongodb, mysql, postgres, smb, vnc, etc.
 - Outdated OpenSSH detection (< v7)
-- Scan history persisted to MongoDB; tap to revisit; swipe-to-delete via header trash icon
+- **PDF export** of completed scans via `GET /api/scans/{id}/pdf` (reportlab) — full report with metadata, findings table, host/port tables
+- Scan history persisted to MongoDB; tap to revisit; trash icon to delete; download icon to export PDF
 - Input validation: target regex + dangerous shell metachar blocklist on custom flags
 
 ## API
@@ -25,6 +27,7 @@ A mobile-first network scanner powered by **Nmap**, packaged as an Expo Router a
 - `POST /api/scans` `{target, scan_type, custom_flags?}` - creates and starts scan
 - `GET /api/scans` - list history (newest first)
 - `GET /api/scans/{id}` - poll for status / results
+- `GET /api/scans/{id}/pdf` - download PDF report
 - `DELETE /api/scans/{id}` - remove a scan
 
 ## Setup
